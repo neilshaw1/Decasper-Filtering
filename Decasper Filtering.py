@@ -40,50 +40,39 @@ law_office_map = {
 }
 
 def clean_value(val):
-    # keep previous behavior: try numeric, then date, else uppercase stripped string
     if pd.isna(val):
         return val
     try:
         return pd.to_numeric(val)
     except:
         try:
-            # return date object if parseable
             return pd.to_datetime(val).date()
         except:
             return str(val).strip().upper().replace('="', '').replace('"', '')
 
 def process_file(file_path):
-    # read as strings first to avoid unexpected dtype coercion by pandas
     df = pd.read_csv(file_path, dtype=str)
-
-    # normalize column names: strip spaces and uppercase (so "PATLNAME " -> "PATLNAME")
     df.columns = df.columns.str.strip().str.upper()
 
-    # apply clean_value to every cell (elementwise)
     df = df.applymap(clean_value)
 
-    # make sure required columns exist
     if "PRESEMAIL" not in df.columns or "GROUPNO" not in df.columns:
         messagebox.showerror("Error", "Input CSV missing PRESEMAIL or GROUPNO columns.")
         return
 
-    # map group names and filter rows in a vectorized way
     df['MAPVAL'] = df['GROUPNO'].map(law_office_map)
     df_filtered = df[(df['PRESEMAIL'] == "DECASPER@GMAIL") & (df['MAPVAL'] == "DECASPER")].copy()
     df_filtered.drop(columns=['MAPVAL'], inplace=True)
 
     if not df_filtered.empty:
-        # Normalize date-like columns to simple YYYY-MM-DD strings (if parseable)
         for col in ["DATEF", "PATDOB"]:
             if col in df_filtered.columns:
                 parsed = pd.to_datetime(df_filtered[col], errors='coerce')
                 df_filtered[col] = parsed.dt.date.astype(str).where(parsed.notna(), df_filtered[col].astype(str))
 
-        # drop unwanted columns if present
         cols_to_drop = ["PRESEMAIL", "PICKEDUP"]
         df_filtered = df_filtered.drop(columns=[c for c in cols_to_drop if c in df_filtered.columns])
 
-        # Prepare save path
         folder = os.path.dirname(file_path)
         save_path = os.path.join(folder, "filtered_decasper.xlsx")
 
@@ -92,7 +81,6 @@ def process_file(file_path):
             workbook = writer.book
             worksheet = writer.sheets["Filtered Data"]
 
-            # Header format
             header_format = workbook.add_format({
                 'bold': True,
                 'text_wrap': False,
@@ -101,17 +89,13 @@ def process_file(file_path):
                 'font_color': '#000000',
                 'border': 0
             })
-            # Apply header formatting (overwrite header row)
             for col_num, value in enumerate(df_filtered.columns.values):
                 worksheet.write(0, col_num, value, header_format)
 
-            # Auto-adjust column widths
             for i, col in enumerate(df_filtered.columns):
-                # cast to str to compute length safely
                 column_len = max(df_filtered[col].astype(str).map(len).max(), len(col)) + 4
                 worksheet.set_column(i, i, column_len)
 
-            # Currency formatting for TOTALRXAMOUNT if present
             if "TOTALRXAMOUNT" in df_filtered.columns:
                 col_idx = df_filtered.columns.get_loc("TOTALRXAMOUNT")
                 total_series = pd.to_numeric(df_filtered["TOTALRXAMOUNT"], errors='coerce')
@@ -136,7 +120,6 @@ def process_file(file_path):
                     else:
                         worksheet.write(total_row, i_col, "", total_format)
             else:
-                # If no TOTALRXAMOUNT column, position totals start two rows below data's last row
                 total_row = len(df_filtered) + 1
                 total_format = workbook.add_format({
                     'bold': True,
@@ -145,18 +128,13 @@ def process_file(file_path):
                     'border': 0
                 })
 
-            # === NEW: count unique last names robustly ===
-            # normalized column name is "PATLNAME" (no trailing space)
             if "PATLNAME" in df_filtered.columns:
-                # convert to string, strip whitespace, treat empty strings as NaN, then count unique non-null
                 lname_series = df_filtered["PATLNAME"].astype(str).str.strip()
                 lname_series = lname_series.replace("", pd.NA)
                 unique_people_count = lname_series.dropna().nunique()
             else:
-                # fallback to number of rows if PATLNAME missing
                 unique_people_count = len(df_filtered)
 
-            # write the unique count a couple rows below totals
             unique_row = total_row + 2
             worksheet.write(unique_row, 0, f"# of Unique Names: {unique_people_count}", total_format)
 
@@ -199,3 +177,4 @@ class App(tk.Tk):
 
 app = App()
 app.mainloop()
+
